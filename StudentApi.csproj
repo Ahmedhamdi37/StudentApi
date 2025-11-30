@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\StudentAPIBusinessLayer\StudentAPIBusinessLayer.csproj" />
+    <ProjectReference Include="..\StudentModels\StudentModels.csproj" />
   </ItemGroup>
 
 </Project>

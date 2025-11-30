@@ -1,7 +1,7 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using StudentApi.Model;
+﻿using Microsoft.AspNetCore.Mvc;
 using StudentApi.DataSimulation;
+using StudentApi.Model;
+using StudentModels.DTOs;
 namespace StudentApi.Controllers
 {
     [Route("api/Student")]
@@ -11,15 +11,21 @@ namespace StudentApi.Controllers
         private static readonly object _lockObj = new object();
 
         [HttpGet("All", Name = "GetAllStudents")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
 
-        public ActionResult<IEnumerable<Student>> GetAllStudents()
+        public ActionResult<IEnumerable<StudentDTO>> GetAllStudents()
         {
-            if (StudentDataSimulation.StudentsList.Count == 0)
+            List<StudentDTO> StudentList = StudentAPIBusinessLayer.Student.AllStudents();
+
+            if (StudentList.Count == 0)
             {
                 return NotFound("No Students found.");
             }
-            return Ok(StudentDataSimulation.StudentsList);
+            return Ok(StudentList);
         }
+
+
         [HttpGet("Passed", Name = "GetPassedStudents")]
 
         [ProducesResponseType(StatusCodes.Status200OK)]
@@ -78,7 +84,7 @@ namespace StudentApi.Controllers
             {
                 return BadRequest("Invalid student data.");
             }
-            newStudent.Id = StudentDataSimulation.StudentsList.Count > 0 ? StudentDataSimulation.StudentsList.Max(s=> s.Id) + 1 : 1;
+            newStudent.Id = StudentDataSimulation.StudentsList.Count > 0 ? StudentDataSimulation.StudentsList.Max(s => s.Id) + 1 : 1;
             StudentDataSimulation.StudentsList.Add(newStudent);
 
             return CreatedAtRoute("GetStudentById", new { id = newStudent.Id }, newStudent);

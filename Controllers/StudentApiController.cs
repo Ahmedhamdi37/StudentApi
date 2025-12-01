@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using StudentApi.DataSimulation;
 using StudentApi.Model;
+using StudentDataAccessLayer;
 using StudentModels.DTOs;
 namespace StudentApi.Controllers
 {
@@ -13,7 +13,6 @@ namespace StudentApi.Controllers
         [HttpGet("All", Name = "GetAllStudents")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-
         public ActionResult<IEnumerable<StudentDTO>> GetAllStudents()
         {
             List<StudentDTO> StudentList = StudentAPIBusinessLayer.Student.AllStudents();
@@ -25,101 +24,102 @@ namespace StudentApi.Controllers
             return Ok(StudentList);
         }
 
-
         [HttpGet("Passed", Name = "GetPassedStudents")]
-
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public ActionResult<IEnumerable<Student>> GetPassedStudents()
+        public ActionResult<IEnumerable<StudentDTO>> GetPassedStudents()
         {
-            var passedStudents = StudentDataSimulation.StudentsList.Where(s => s.Grade >= 50).ToList();
+            var passedStudents = StudentAPIBusinessLayer.Student.AllStudentsPassed();
             if (passedStudents.Count == 0)
             {
                 return NotFound("No Passed Students found.");
             }
             return Ok(passedStudents);
         }
-        [HttpGet("Avg", Name = "GetAvgStudents")]
 
+        [HttpGet("Avg", Name = "GetAvgStudents")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public ActionResult<double> GetAvgStudents()
         {
-            StudentDataSimulation.StudentsList.Clear();
-            if (StudentDataSimulation.StudentsList.Count == 0)
+            var AvgGrade = StudentData.GetAverageStudent();
+
+            if (AvgGrade == 0)
             {
                 return NotFound("No Students found.");
             }
-            var AvgGrade = StudentDataSimulation.StudentsList.Average(s => s.Grade);
             return Ok(AvgGrade);
         }
-        [HttpGet("{id}", Name = "GetStudentByID")]
 
+        [HttpGet("{id:int}", Name = "GetStudentByID")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-
-        public ActionResult<IEnumerable<Student>> GetStudentByID(int id)
+        public ActionResult<IEnumerable<StudentDTO>> GetStudentByID(int id)
         {
             if (id < 1)
             {
                 return BadRequest("Entry Anthor ID");
             }
-            var Student = StudentDataSimulation.StudentsList.FirstOrDefault(s => s.Id == id);
+            var Student = StudentAPIBusinessLayer.Student.Find(id);
             if (Student == null)
             {
-                return NotFound("Not Found!");
+                return NotFound($"Student with ID {id} not found.");
             }
-            return Ok(Student);
+            StudentDTO SDTO = Student.SDTO;
+            return Ok(SDTO);
         }
 
         [HttpPost(Name = "AddStudent")]
-
         [ProducesResponseType(StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-
-        public ActionResult<Student> AddStudent(Student newStudent)
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public ActionResult<StudentDTO> AddStudent(StudentDTO SDTO)
         {
-            if (newStudent == null || string.IsNullOrEmpty(newStudent.Name) || newStudent.Age < 0 || newStudent.Grade < 0)
-            {
+            if (SDTO == null || string.IsNullOrEmpty(SDTO.Name) || SDTO.Age < 0 || SDTO.Grade < 0)
                 return BadRequest("Invalid student data.");
-            }
-            newStudent.Id = StudentDataSimulation.StudentsList.Count > 0 ? StudentDataSimulation.StudentsList.Max(s => s.Id) + 1 : 1;
-            StudentDataSimulation.StudentsList.Add(newStudent);
 
-            return CreatedAtRoute("GetStudentById", new { id = newStudent.Id }, newStudent);
+            var Student = new StudentAPIBusinessLayer.Student(SDTO);
+
+            if (Student.Save())
+            {
+                SDTO.Id = Student.ID;
+                return CreatedAtRoute("GetStudentById", new { id = SDTO.Id }, SDTO);
+            }
+
+            return StatusCode(500, "Faild To Add This Student");
         }
 
-        [HttpDelete("{id}", Name = "DeleteStudent")]
-        public IActionResult DeleteStudent(int ID)
+        [HttpDelete("{id:int}", Name = "DeleteStudent")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public IActionResult DeleteStudent(int id)
         {
-            if (ID <= 0)
-            {
+            if (id <= 0)
                 return BadRequest("Invalid Student ID.");
-            }
             try
             {
-                lock (StudentDataSimulation.StudentsList)
+                lock (_lockObj)
                 {
-                    var student = StudentDataSimulation.StudentsList.FirstOrDefault(s => s.Id == ID);
+                    var student = StudentAPIBusinessLayer.Student.Find(id);
+
                     if (student == null)
                     {
                         return NotFound("This ID Not Found");
                     }
 
-                    bool remove = StudentDataSimulation.StudentsList.Remove(student);
+                    bool remove = StudentAPIBusinessLayer.Student.Delete(id);
 
                     if (!remove)
-                    {
                         return StatusCode(500, "Faild To Delete This Student");
-                    }
                 }
-
                 return NoContent();
             }
             catch
             {
-                return StatusCode(500, $"An Error Ocured when Delete Student with ID: {ID}");
+                return StatusCode(500, $"An Error Ocured when Delete Student with ID: {id}");
             }
         }
 
@@ -127,31 +127,30 @@ namespace StudentApi.Controllers
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
-
-        public IActionResult UpdateStudent(int id, [FromBody] Student st)
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public IActionResult UpdateStudent(int id, [FromBody] StudentDTO st)
         {
-            if (st == null)
+            if (id < 1 || st == null || string.IsNullOrEmpty(st.Name) || st.Age < 0 || st.Grade < 0)
                 return BadRequest("Invalid Student object");
 
-            if (id != st.Id)
-                return BadRequest("ID in URL does not match ID in body");
-            Student findStudent = null;
+            var findStudent = StudentAPIBusinessLayer.Student.Find(id);
 
             lock (_lockObj)
             {
-                findStudent = StudentDataSimulation.StudentsList.FirstOrDefault(s => s.Id == id);
-
                 if (findStudent != null)
                 {
                     findStudent.Name = st.Name;
                     findStudent.Age = st.Age;
                     findStudent.Grade = st.Grade;
+
+                    if (findStudent.Save())
+                        return NoContent();
                 }
             }
             if (findStudent == null)
                 return NotFound($"Student with ID: {id} not found");
 
-            return NoContent();
+            return StatusCode(500, "Faild To Update This Student");
         }
     }
 }
